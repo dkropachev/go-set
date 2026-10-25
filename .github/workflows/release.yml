@@ -32,7 +32,10 @@ jobs:
               });
               if (reference.ref !== context.ref) throw new Error('Unexpected tag reference');
               let object = reference.object;
-              for (let depth = 0; object.type === 'tag' && depth < 10; depth++) {
+              const visited = new Set();
+              while (object.type === 'tag') {
+                if (visited.has(object.sha)) throw new Error('Cycle in annotated version tag');
+                visited.add(object.sha);
                 const {data: annotated} = await github.rest.git.getTag({
                   ...repo, tag_sha: object.sha
                 });

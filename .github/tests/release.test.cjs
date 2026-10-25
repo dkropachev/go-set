@@ -22,14 +22,17 @@ async function publish(options = {}) {
         tagReads++;
         if (options.missingTag) throw {status: 404};
         return {data: {ref: 'refs/tags/v1.0.2', object: options.annotated ?
-          {type: 'tag', sha: 'annotation'} :
+          {type: 'tag', sha: 'annotation-0'} :
           {type: 'commit', sha: options.movedTag || (options.moveAfterNotes && tagReads > 1) ? 'other' : 'commit'}}};
       },
       getTag: async params => {
         calls.push('peel');
-        assert.equal(params.tag_sha, 'annotation');
-        return {data: {object: options.cyclicTag ? {type: 'tag', sha: 'annotation'} :
-          {type: 'commit', sha: 'commit'}}};
+        const depth = Number(params.tag_sha.replace('annotation-', ''));
+        assert.ok(Number.isSafeInteger(depth));
+        if (options.tagLookupFailure) throw new Error('Tag object unavailable');
+        return {data: {object: options.cyclicTag ? {type: 'tag', sha: 'annotation-0'} :
+          depth + 1 < (options.annotationDepth ?? 1) ? {type: 'tag', sha: `annotation-${depth + 1}`} :
+          {type: options.nonCommitTag ? 'tree' : 'commit', sha: 'commit'}}};
       }
     },
     repos: {
@@ -85,6 +88,20 @@ test('annotated tags resolve to the triggering commit', async () => {
   assert.equal(calls.filter(call => call === 'peel').length, 2);
 });
 
+test('valid chains deeper than ten annotations resolve without an arbitrary ceiling', async () => {
+  const {calls, error} = await publish({annotated: true, annotationDepth: 12});
+  assert.ifError(error);
+  assert.equal(calls.filter(call => call === 'peel').length, 24);
+  assert.ok(calls.includes('create'));
+});
+
+test('repeated annotated objects fail visibly without unbounded traversal', async () => {
+  const {calls, error} = await publish({annotated: true, cyclicTag: true});
+  assert.match(error.message, /Cycle in annotated version tag/);
+  assert.equal(calls.filter(call => call === 'peel').length, 1);
+  assert.ok(!calls.includes('create'));
+});
+
 test('reruns preserve published release and curated notes', async () => {
   const {calls, error} = await publish({existing: {}});
   assert.ifError(error);
@@ -102,7 +119,8 @@ test('draft, unpublished or wrong-tag releases fail visibly', async () => {
 test('invalid, missing, moved and non-commit tags cannot publish', async () => {
   for (const options of [{ref: 'refs/heads/master'}, {ref: 'refs/tags/v1.0.2-extra'},
     {missingTag: true}, {movedTag: true}, {moveAfterNotes: true},
-    {annotated: true, cyclicTag: true}]) {
+    {annotated: true, cyclicTag: true}, {annotated: true, nonCommitTag: true},
+    {annotated: true, tagLookupFailure: true}]) {
     const {calls, error} = await publish(options);
     assert.ok(error);
     assert.ok(!calls.includes('create'));
