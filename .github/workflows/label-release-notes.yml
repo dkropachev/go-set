@@ -26,6 +26,30 @@ jobs:
     env:
       PR_NUMBER: ${{ github.event.pull_request.number || inputs.pull_request }}
     steps:
+      - name: Confirm pull request target
+        id: target
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const raw = process.env.PR_NUMBER;
+            if (typeof raw !== 'string' || !/^[1-9][0-9]*$/.test(raw) ||
+                !Number.isSafeInteger(Number(raw))) {
+              throw new Error('Expected a canonical positive safe PR number');
+            }
+            const number = Number(raw);
+            if (context.eventName === 'pull_request_target') {
+              if (context.payload?.pull_request?.number !== number) {
+                throw new Error('Event target is not the requested pull request');
+              }
+            } else if (context.eventName === 'workflow_dispatch') {
+              const {data: pr} = await github.rest.pulls.get({
+                ...context.repo, pull_number: number
+              });
+              if (pr?.number !== number) throw new Error('Target is not the requested pull request');
+            } else {
+              throw new Error('Unsupported classification event');
+            }
+            core.setOutput('confirmed-pr', raw);
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         id: checkout
         with:
@@ -55,6 +79,8 @@ jobs:
         if: always()
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
+          TARGET_OUTCOME: ${{ steps.target.outcome }}
+          CONFIRMED_PR: ${{ steps.target.outputs.confirmed-pr }}
           CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           GUARD_OUTCOME: ${{ steps.guard.outcome }}
@@ -65,8 +91,12 @@ jobs:
           script: |
             // Keep cleanup independent of checkout and installed dependencies.
             const raw = process.env.PR_NUMBER;
-            if (!/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+            if (typeof raw !== 'string' || !/^[1-9][0-9]*$/.test(raw) ||
+                !Number.isSafeInteger(Number(raw))) {
               throw new Error('Expected a canonical positive safe PR number');
+            }
+            if (process.env.TARGET_OUTCOME !== 'success' || process.env.CONFIRMED_PR !== raw) {
+              throw new Error('Pull request target was not confirmed; refusing label writes');
             }
             const number = Number(raw);
             const removeLabel = async () => {

@@ -30,6 +30,18 @@ title, `chore`, and dependency labels do not hide changes.
 
 The workflow runs on opened, synchronized, reopened, edited, and closed PRs.
 `sync-labels: true` removes the omission label when the filenames stop matching.
+Before checkout or dependency installation, the workflow confirms the exact PR
+number from a matching trusted PR event or a successful manual PR lookup. It
+persists that number for finalization. An ordinary issue, unavailable or mismatched
+lookup, missing confirmation, or changed target receives no label writes.
+Confirmation survives later setup or API failure, so a confirmed PR can still
+receive best-effort cleanup without another identity lookup.
+
+The omission marker has whole-name ASCII case-insensitive identity even when
+GitHub preserves capitalization in label metadata. Every actual label record must
+have a nonempty string name; malformed metadata fails verification. Prefix,
+suffix, and Unicode lookalike labels are distinct and remain untouched.
+
 A trusted guard reads the same canonical YAML with locked parser and matcher
 versions. It requires a positive safe PR number, a nonempty complete paginated
 file listing with unique names, and stable head/base SHAs and changed-file count
